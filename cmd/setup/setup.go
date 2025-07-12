@@ -4,6 +4,7 @@ import (
 	"sync/atomic"
 
 	"github.com/avalonbits/rinha-backend-2025/config"
+	"github.com/avalonbits/rinha-backend-2025/endpoints/api"
 	"github.com/labstack/echo/v4"
 )
 
@@ -13,6 +14,10 @@ func Echo(cfg config.Config) *Server {
 
 	e := echo.New()
 	server.Echo = e
+
+	handlers := api.New()
+	e.POST("/payments", handlers.ProcessPayment)
+	e.GET("/payments-summary", handlers.PaymentSummary)
 
 	return server
 }
