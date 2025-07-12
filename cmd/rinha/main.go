@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/avalonbits/rinha/cmd/setup"
-	"github.com/avalonbits/rinha/config"
+	"github.com/avalonbits/rinha-backend-2025/cmd/setup"
+	"github.com/avalonbits/rinha-backend-2025/config"
 )
 
 var (
