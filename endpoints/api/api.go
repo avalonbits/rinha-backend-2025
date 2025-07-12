@@ -3,14 +3,18 @@ package api
 import (
 	"net/http"
 
+	"github.com/avalonbits/rinha-backend-2025/service/payment"
 	"github.com/labstack/echo/v4"
 )
 
 type Handler struct {
+	payments *payment.Service
 }
 
-func New() *Handler {
-	return &Handler{}
+func New(payments *payment.Service) *Handler {
+	return &Handler{
+		payments: payments,
+	}
 }
 
 type processPaymentRequest struct {
