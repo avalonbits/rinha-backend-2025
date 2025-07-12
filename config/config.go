@@ -17,17 +17,25 @@ func Get(ctx context.Context) Config {
 }
 
 type Config struct {
-	Port     string `env:"PORT"`
-	Database string `env:"DATABASE"`
+	Port                    string `env:"PORT"`
+	Database                string `env:"DATABASE"`
+	PaymentProcessorDefault string `env:"PAYMENT_PROCESSOR_DEFAULT"`
+	PaymentProcessorBackup  string `env:"PAYMENT_PROCESSOR_BACKUP"`
 }
 
 func validate(cfg *Config) Config {
 	if cfg.Database == "" {
 		panic("required value for Database")
 	}
+	if cfg.PaymentProcessorDefault == "" {
+		panic("required value for payment processor default")
+	}
+	if cfg.PaymentProcessorBackup == "" {
+		panic("required value for payment processor backup")
+	}
 
 	if cfg.Port == "" {
-		cfg.Port = "9001"
+		cfg.Port = "9999"
 	} else if _, err := strconv.ParseInt(cfg.Port, 10, 16); err != nil {
 		panic("invalid port number: " + cfg.Port)
 	}
