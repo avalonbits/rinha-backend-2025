@@ -19,15 +19,18 @@ services:
           memory: "50MB"
 
   api1: &api
-    image: luizcordista/rinha-backend-2025:tag
+    image: avalonbits/rinha2025:latest
     hostname: api1
     environment:
       - PORT=1323
       - PAYMENT_PROCESSOR_DEFAULT=http://payment-processor-default:8080
       - PAYMENT_PROCESSOR_BACKUP=http://payment-processor-fallback:8080
+      - DATABASE=/tmp/rinha.db
     networks:
       - backend
       - payment-processor
+    volumes:
+      - sqlitedb:/tmp
     deploy:
       resources:
         limits:
@@ -41,6 +44,9 @@ services:
       - PORT=1323
       - PAYMENT_PROCESSOR_DEFAULT=http://payment-processor-default:8080
       - PAYMENT_PROCESSOR_BACKUP=http://payment-processor-fallback:8080
+      - DATABASE=/tmp/rinha.db
+    volumes:
+      - sqlitedb:/tmp
     deploy:
       resources:
         limits:
@@ -52,3 +58,6 @@ networks:
     driver: bridge
   payment-processor:
     external: true
+
+volumes:
+  sqlitedb:
