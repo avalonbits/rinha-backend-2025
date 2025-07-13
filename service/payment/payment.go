@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"sync/atomic"
 	"time"
+
+	"github.com/avalonbits/rinha-backend-2025/service"
 )
 
 type Service struct {
@@ -20,25 +22,28 @@ type Service struct {
 
 func New(mainURL, backupURL string) *Service {
 	return &Service{
-		main:   createClient(mainURL),
-		backup: createClient(backupURL),
+		main:   createClient(mainURL, 0),
+		backup: createClient(backupURL, 2500*time.Millisecond),
 	}
 }
 
-func (s *Service) PreferDefault() *Client {
-	if s.main.available.Load() {
-		return &Client{
-			httpC: s.main,
-		}
-	} else if s.backup.available.Load() {
-		return &Client{
-			httpC: s.backup,
+func (s *Service) preferDefault() *paymentClient {
+	for {
+		if s.main.available.Load() {
+			return &paymentClient{
+				httpC: s.main,
+			}
+		} else if s.backup.available.Load() {
+			return &paymentClient{
+				httpC: s.backup,
+			}
+		} else {
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
-	return nil // no client available.
 }
 
-type Client struct {
+type paymentClient struct {
 	httpC client
 }
 
@@ -48,20 +53,26 @@ type processPaymentRequest struct {
 	RequestedAt   string  `json:"requestedAt"`
 }
 
-func (c *Client) ProcessPayment(ctx context.Context, correlationID string, amount float64, requestedAt string) error {
+const ErrAlreadyProcessed = service.Error("payment was already processed. check correlationId")
+
+func (s *Service) ProcessPayment(ctx context.Context, correlationID string, amount float64, requestedAt string) error {
 	req := processPaymentRequest{
 		CorrleationID: correlationID,
 		Amount:        amount,
 		RequestedAt:   requestedAt,
 	}
 
-	if err := c.httpC.post(ctx, "/payments", req, nil); err != nil {
+	status, err := s.preferDefault().httpC.post(ctx, "/payments", req, nil)
+	if err != nil {
+		if status == http.StatusUnprocessableEntity {
+			return ErrAlreadyProcessed
+		}
 		return err
 	}
 	return nil
 }
 
-func createClient(serviceURL string) client {
+func createClient(serviceURL string, delayFirstCheck time.Duration) client {
 	baseURL, err := url.Parse(serviceURL)
 	if err != nil {
 		panic(err)
@@ -81,6 +92,9 @@ func createClient(serviceURL string) client {
 
 	// Keep track of the availability of the client.
 	go func() {
+		if delayFirstCheck > 0 {
+			time.Sleep(delayFirstCheck)
+		}
 		c.updateAvailability()
 		ticker := time.Tick(5010 * time.Millisecond)
 		for {
@@ -144,26 +158,26 @@ func (c client) get(endpoint string, res any) error {
 	return nil
 }
 
-func (c client) post(ctx context.Context, endpoint string, req, res any) error {
+func (c client) post(ctx context.Context, endpoint string, req, res any) (int, error) {
 	target := c.baseURL.JoinPath(endpoint)
 
 	buf := bytes.Buffer{}
 	if req != nil {
 		if err := json.NewEncoder(&buf).Encode(req); err != nil {
-			return err
+			return http.StatusInternalServerError, err
 		}
 	}
 	fmt.Println(buf.String())
 
 	postReq, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), &buf)
 	if err != nil {
-		return err
+		return http.StatusInternalServerError, err
 	}
 	postReq.Header.Add("Content-Type", "application/json")
 
 	resp, err := c.httpC.Do(postReq)
 	if err != nil {
-		return err
+		return http.StatusInternalServerError, err
 	}
 	defer resp.Body.Close()
 
@@ -171,21 +185,21 @@ func (c client) post(ctx context.Context, endpoint string, req, res any) error {
 	if resp.StatusCode >= 400 {
 		msg, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return err
+			return resp.StatusCode, err
 		}
-		return fmt.Errorf("%s: %s", http.StatusText(resp.StatusCode), msg)
+		return resp.StatusCode, fmt.Errorf(string(msg))
 	}
 
 	if res == nil {
-		return nil
+		return resp.StatusCode, nil
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(res); err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil
+			return resp.StatusCode, nil
 		}
-		return err
+		return http.StatusInternalServerError, err
 	}
 
-	return nil
+	return resp.StatusCode, nil
 }

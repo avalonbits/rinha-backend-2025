@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/avalonbits/rinha-backend-2025/service/payment"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
@@ -30,6 +31,9 @@ func (r *processPaymentRequest) validate(c echo.Context) error {
 	if r.CorrleationID == "" {
 		return fmt.Errorf("correlationID is required")
 	}
+	if _, err := uuid.Parse(r.CorrleationID); err != nil {
+		return fmt.Errorf("invalid uuid")
+	}
 
 	if r.Amount <= 0 {
 		return fmt.Errorf("amount must be positive")
@@ -47,12 +51,7 @@ func (h *Handler) ProcessPayment(c echo.Context) error {
 	ctx := c.Request().Context()
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
 
-	client, err := h.getClient()
-	if err != nil {
-		return err
-	}
-
-	if err := client.ProcessPayment(ctx, r.CorrleationID, r.Amount, createdAt); err != nil {
+	if err := h.payments.ProcessPayment(ctx, r.CorrleationID, r.Amount, createdAt); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -86,16 +85,4 @@ func (h *Handler) validateRequest(c echo.Context, req validator) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return nil
-}
-
-func (h *Handler) getClient() (*payment.Client, error) {
-	client := h.payments.PreferDefault()
-	if client == nil {
-		return nil, echo.NewHTTPError(
-			http.StatusServiceUnavailable,
-			"payment process is currently unavailable",
-		)
-	}
-
-	return client, nil
 }
