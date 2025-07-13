@@ -5,6 +5,7 @@ go 1.24.2
 require (
 	github.com/labstack/echo/v4 v4.13.4
 	github.com/sethvargo/go-envconfig v1.3.0
+	go.uber.org/automaxprocs v1.6.0
 )
 
 require (

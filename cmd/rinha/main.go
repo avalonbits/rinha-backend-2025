@@ -12,6 +12,8 @@ import (
 
 	"github.com/avalonbits/rinha-backend-2025/cmd/setup"
 	"github.com/avalonbits/rinha-backend-2025/config"
+
+	_ "go.uber.org/automaxprocs"
 )
 
 var (
