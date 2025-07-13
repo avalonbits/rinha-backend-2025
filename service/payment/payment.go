@@ -177,7 +177,7 @@ func (c paymentClient) post(ctx context.Context, endpoint string, req, res any) 
 		if err != nil {
 			return resp.StatusCode, err
 		}
-		return resp.StatusCode, fmt.Errorf(string(msg))
+		return resp.StatusCode, fmt.Errorf("%s", string(msg))
 	}
 
 	if res == nil {
