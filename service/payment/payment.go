@@ -73,6 +73,24 @@ func (s *Service) Expunge(ctx context.Context, correlationID string) error {
 	})
 }
 
+func (s *Service) preferDefault() paymentClient {
+	for {
+		if s.main.available.Load() {
+			return s.main
+		} else if s.backup.available.Load() {
+			return s.backup
+		} else {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+type paymentClient struct {
+	baseURL   *url.URL
+	httpC     *http.Client
+	available *atomic.Bool
+}
+
 func createClient(serviceURL string, delayFirstCheck time.Duration) paymentClient {
 	baseURL, err := url.Parse(serviceURL)
 	if err != nil {
@@ -97,7 +115,7 @@ func createClient(serviceURL string, delayFirstCheck time.Duration) paymentClien
 			time.Sleep(delayFirstCheck)
 		}
 		c.updateAvailability()
-		ticker := time.Tick(5010 * time.Millisecond)
+		ticker := time.Tick(5001 * time.Millisecond)
 		for {
 			<-ticker
 			c.updateAvailability()
@@ -105,24 +123,6 @@ func createClient(serviceURL string, delayFirstCheck time.Duration) paymentClien
 	}()
 
 	return c
-}
-
-func (s *Service) preferDefault() paymentClient {
-	for {
-		if s.main.available.Load() {
-			return s.main
-		} else if s.backup.available.Load() {
-			return s.backup
-		} else {
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-}
-
-type paymentClient struct {
-	baseURL   *url.URL
-	httpC     *http.Client
-	available *atomic.Bool
 }
 
 type updateAvailabilityResponse struct {
