@@ -38,7 +38,7 @@ services:
     <<: *api
     hostname: api2
     environment:
-      - PORT=1324
+      - PORT=1323
       - PAYMENT_PROCESSOR_DEFAULT=http://payment-processor-default:8080
       - PAYMENT_PROCESSOR_BACKUP=http://payment-processor-fallback:8080
     deploy:
