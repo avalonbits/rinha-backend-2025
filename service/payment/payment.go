@@ -57,7 +57,7 @@ func (s *Service) ProcessPayment(ctx context.Context, correlationID string, amou
 	return nil
 }
 
-func (s *Service) LogPayment(ctx context.Context, correlationID string, amount float64, requestedAt string) error {
+func (s *Service) Log(ctx context.Context, correlationID string, amount float64, requestedAt string) error {
 	return s.db.Write(ctx, func(queries *datastore.Queries) error {
 		return queries.LogPayment(ctx, datastore.LogPaymentParams{
 			CorrelationID: correlationID,
@@ -67,7 +67,7 @@ func (s *Service) LogPayment(ctx context.Context, correlationID string, amount f
 	})
 }
 
-func (s *Service) ExpungePayment(ctx context.Context, correlationID string) error {
+func (s *Service) Expunge(ctx context.Context, correlationID string) error {
 	return s.db.Write(ctx, func(queries *datastore.Queries) error {
 		return queries.ExpungePayment(ctx, correlationID)
 	})

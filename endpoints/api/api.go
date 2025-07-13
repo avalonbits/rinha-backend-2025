@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -22,16 +23,16 @@ func New(payments *payment.Service) *Handler {
 }
 
 type processPaymentRequest struct {
-	CorrleationID string  `json:"correlationId"`
+	CorrelationID string  `json:"correlationId"`
 	Amount        float64 `json:"amount"`
 }
 
 func (r *processPaymentRequest) validate(c echo.Context) error {
-	r.CorrleationID = strings.TrimSpace(r.CorrleationID)
-	if r.CorrleationID == "" {
+	r.CorrelationID = strings.TrimSpace(r.CorrelationID)
+	if r.CorrelationID == "" {
 		return fmt.Errorf("correlationID is required")
 	}
-	if _, err := uuid.Parse(r.CorrleationID); err != nil {
+	if _, err := uuid.Parse(r.CorrelationID); err != nil {
 		return fmt.Errorf("invalid uuid")
 	}
 
@@ -51,8 +52,16 @@ func (h *Handler) ProcessPayment(c echo.Context) error {
 	ctx := c.Request().Context()
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
 
-	if err := h.payments.ProcessPayment(ctx, r.CorrleationID, r.Amount, createdAt); err != nil {
+	if err := h.payments.Log(ctx, r.CorrelationID, r.Amount, createdAt); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	if err := h.payments.ProcessPayment(ctx, r.CorrelationID, r.Amount, createdAt); err != nil {
+		// TODO(icc): consider a 2-write solution if we get inconsistencies.
+		if expErr := h.payments.Expunge(ctx, r.CorrelationID); expErr != nil {
+			err = errors.Join(err, expErr)
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
 	return c.String(http.StatusOK, "")
