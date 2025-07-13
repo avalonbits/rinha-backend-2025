@@ -13,14 +13,19 @@ import (
 	"time"
 
 	"github.com/avalonbits/rinha-backend-2025/service"
+	"github.com/avalonbits/rinha-backend-2025/storage"
+	"github.com/avalonbits/rinha-backend-2025/storage/datastore"
 )
+
+type DB = storage.DB[datastore.Queries]
 
 type Service struct {
 	main   paymentClient
 	backup paymentClient
+	db     *DB
 }
 
-func New(mainURL, backupURL string) *Service {
+func New(mainURL, backupURL string, db *DB) *Service {
 	return &Service{
 		main:   createClient(mainURL, 0),
 		backup: createClient(backupURL, 2500*time.Millisecond),
