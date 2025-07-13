@@ -52,6 +52,10 @@ func (s *Service) ProcessPayment(ctx context.Context, correlationID string, amou
 	return nil
 }
 
+func (s *Service) LogPayment(ctx context.Context, correlationID string, amount float64, requestedAt string) error {
+	return nil
+}
+
 func createClient(serviceURL string, delayFirstCheck time.Duration) paymentClient {
 	baseURL, err := url.Parse(serviceURL)
 	if err != nil {
