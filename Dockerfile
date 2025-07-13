@@ -10,11 +10,10 @@ RUN GOOS=linux GOARCH=amd64 go build -tags 'fts5,osusergo,netgo,static' --ldflag
 FROM alpine:latest
 RUN apk update && apk add --no-cache libc6-compat
 
-EXPOSE 9999
+EXPOSE 1323
 
 COPY --from=builder /app/rinha ./rinha
 COPY --from=builder /app/.env ./.env
-COPY --from=builder /app/service.sh ./service.sh
 
 # Run on container startup.
-CMD ["./start.sh"]
+CMD ["./rinha"]
