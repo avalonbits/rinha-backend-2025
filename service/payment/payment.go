@@ -16,8 +16,8 @@ import (
 )
 
 type Service struct {
-	main   client
-	backup client
+	main   paymentClient
+	backup paymentClient
 }
 
 func New(mainURL, backupURL string) *Service {
@@ -25,26 +25,6 @@ func New(mainURL, backupURL string) *Service {
 		main:   createClient(mainURL, 0),
 		backup: createClient(backupURL, 2500*time.Millisecond),
 	}
-}
-
-func (s *Service) preferDefault() *paymentClient {
-	for {
-		if s.main.available.Load() {
-			return &paymentClient{
-				httpC: s.main,
-			}
-		} else if s.backup.available.Load() {
-			return &paymentClient{
-				httpC: s.backup,
-			}
-		} else {
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-}
-
-type paymentClient struct {
-	httpC client
 }
 
 type processPaymentRequest struct {
@@ -62,7 +42,7 @@ func (s *Service) ProcessPayment(ctx context.Context, correlationID string, amou
 		RequestedAt:   requestedAt,
 	}
 
-	status, err := s.preferDefault().httpC.post(ctx, "/payments", req, nil)
+	status, err := s.preferDefault().post(ctx, "/payments", req, nil)
 	if err != nil {
 		if status == http.StatusUnprocessableEntity {
 			return ErrAlreadyProcessed
@@ -72,13 +52,13 @@ func (s *Service) ProcessPayment(ctx context.Context, correlationID string, amou
 	return nil
 }
 
-func createClient(serviceURL string, delayFirstCheck time.Duration) client {
+func createClient(serviceURL string, delayFirstCheck time.Duration) paymentClient {
 	baseURL, err := url.Parse(serviceURL)
 	if err != nil {
 		panic(err)
 	}
 
-	c := client{
+	c := paymentClient{
 		baseURL: baseURL,
 		httpC: &http.Client{
 			Timeout: 120 * time.Second,
@@ -106,7 +86,19 @@ func createClient(serviceURL string, delayFirstCheck time.Duration) client {
 	return c
 }
 
-type client struct {
+func (s *Service) preferDefault() paymentClient {
+	for {
+		if s.main.available.Load() {
+			return s.main
+		} else if s.backup.available.Load() {
+			return s.backup
+		} else {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+type paymentClient struct {
 	baseURL   *url.URL
 	httpC     *http.Client
 	available *atomic.Bool
@@ -117,7 +109,7 @@ type updateAvailabilityResponse struct {
 	MinResponseTime int  `json:"minResponseTime"`
 }
 
-func (c client) updateAvailability() {
+func (c paymentClient) updateAvailability() {
 	res := updateAvailabilityResponse{}
 	if err := c.get("/payments/service-health", &res); err != nil {
 		fmt.Println(err)
@@ -127,7 +119,7 @@ func (c client) updateAvailability() {
 	}
 }
 
-func (c client) get(endpoint string, res any) error {
+func (c paymentClient) get(endpoint string, res any) error {
 	target := c.baseURL.JoinPath(endpoint)
 
 	resp, err := c.httpC.Get(target.String())
@@ -158,7 +150,7 @@ func (c client) get(endpoint string, res any) error {
 	return nil
 }
 
-func (c client) post(ctx context.Context, endpoint string, req, res any) (int, error) {
+func (c paymentClient) post(ctx context.Context, endpoint string, req, res any) (int, error) {
 	target := c.baseURL.JoinPath(endpoint)
 
 	buf := bytes.Buffer{}
@@ -167,7 +159,6 @@ func (c client) post(ctx context.Context, endpoint string, req, res any) (int, e
 			return http.StatusInternalServerError, err
 		}
 	}
-	fmt.Println(buf.String())
 
 	postReq, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), &buf)
 	if err != nil {
@@ -181,7 +172,6 @@ func (c client) post(ctx context.Context, endpoint string, req, res any) (int, e
 	}
 	defer resp.Body.Close()
 
-	fmt.Println(resp)
 	if resp.StatusCode >= 400 {
 		msg, err := io.ReadAll(resp.Body)
 		if err != nil {
