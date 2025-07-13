@@ -2,6 +2,7 @@ package payment
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,17 +45,17 @@ type Client struct {
 type processPaymentRequest struct {
 	CorrleationID string  `json:"correlationId"`
 	Amount        float64 `json:"amount"`
-	RequestedAt   string  `json:"requestAt"`
+	RequestedAt   string  `json:"requestedAt"`
 }
 
-func (c *Client) ProcessPayment(correlationID string, amount float64, requestedAt string) error {
+func (c *Client) ProcessPayment(ctx context.Context, correlationID string, amount float64, requestedAt string) error {
 	req := processPaymentRequest{
 		CorrleationID: correlationID,
 		Amount:        amount,
 		RequestedAt:   requestedAt,
 	}
 
-	if err := c.httpC.post("/payments", req, nil); err != nil {
+	if err := c.httpC.post(ctx, "/payments", req, nil); err != nil {
 		return err
 	}
 	return nil
@@ -143,27 +144,36 @@ func (c client) get(endpoint string, res any) error {
 	return nil
 }
 
-func (c client) post(endpoint string, req, res any) error {
+func (c client) post(ctx context.Context, endpoint string, req, res any) error {
 	target := c.baseURL.JoinPath(endpoint)
 
 	buf := bytes.Buffer{}
 	if req != nil {
 		if err := json.NewEncoder(&buf).Encode(req); err != nil {
-			return nil
+			return err
 		}
 	}
-	resp, err := c.httpC.Post(target.String(), "application/json", &buf)
+	fmt.Println(buf.String())
+
+	postReq, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), &buf)
+	if err != nil {
+		return err
+	}
+	postReq.Header.Add("Content-Type", "application/json")
+
+	resp, err := c.httpC.Do(postReq)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
+	fmt.Println(resp)
 	if resp.StatusCode >= 400 {
 		msg, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return err
 		}
-		return fmt.Errorf("%s: %q", http.StatusText(resp.StatusCode), msg)
+		return fmt.Errorf("%s: %s", http.StatusText(resp.StatusCode), msg)
 	}
 
 	if res == nil {

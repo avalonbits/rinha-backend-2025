@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/avalonbits/rinha-backend-2025/service/payment"
 	"github.com/labstack/echo/v4"
@@ -43,6 +44,18 @@ func (h *Handler) ProcessPayment(c echo.Context) error {
 		return err
 	}
 
+	ctx := c.Request().Context()
+	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+
+	client, err := h.getClient()
+	if err != nil {
+		return err
+	}
+
+	if err := client.ProcessPayment(ctx, r.CorrleationID, r.Amount, createdAt); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
 	return c.String(http.StatusOK, "")
 }
 
@@ -73,4 +86,16 @@ func (h *Handler) validateRequest(c echo.Context, req validator) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return nil
+}
+
+func (h *Handler) getClient() (*payment.Client, error) {
+	client := h.payments.PreferDefault()
+	if client == nil {
+		return nil, echo.NewHTTPError(
+			http.StatusServiceUnavailable,
+			"payment process is currently unavailable",
+		)
+	}
+
+	return client, nil
 }
