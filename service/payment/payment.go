@@ -13,22 +13,21 @@ import (
 	"time"
 
 	"github.com/avalonbits/rinha-backend-2025/service"
-	"github.com/avalonbits/rinha-backend-2025/storage"
 	"github.com/avalonbits/rinha-backend-2025/storage/datastore"
+	"github.com/avalonbits/rinha-backend-2025/storage/sharded"
 )
-
-type DB = storage.DB[datastore.Queries]
 
 type Service struct {
 	main   paymentClient
 	backup paymentClient
-	db     *DB
+	store  *sharded.Store
 }
 
-func New(mainURL, backupURL string, db *DB) *Service {
+func New(mainURL, backupURL string, store *sharded.Store) *Service {
 	return &Service{
-		main:   createClient(mainURL, 0),
-		backup: createClient(backupURL, 2500*time.Millisecond),
+		main:   createClient("default", mainURL, 0),
+		backup: createClient("fallback", backupURL, 2500*time.Millisecond),
+		store:  store,
 	}
 }
 
@@ -40,35 +39,91 @@ type processPaymentRequest struct {
 
 const ErrAlreadyProcessed = service.Error("payment was already processed. check correlationId")
 
-func (s *Service) ProcessPayment(ctx context.Context, correlationID string, amount float64, requestedAt string) error {
+func (s *Service) ProcessPayment(
+	ctx context.Context, correlationID string, amount float64, requestedAt string,
+) (string, error) {
 	req := processPaymentRequest{
 		CorrleationID: correlationID,
 		Amount:        amount,
 		RequestedAt:   requestedAt,
 	}
 
-	status, err := s.preferDefault().post(ctx, "/payments", req, nil)
+	client := s.preferDefault()
+	status, err := client.post(ctx, "/payments", req, nil)
 	if err != nil {
 		if status == http.StatusUnprocessableEntity {
-			return ErrAlreadyProcessed
+			return "", ErrAlreadyProcessed
 		}
-		return err
+		return "", err
 	}
-	return nil
+
+	return client.String(), nil
 }
 
-func (s *Service) Log(ctx context.Context, correlationID string, amount float64, requestedAt string) error {
-	return s.db.Write(ctx, func(queries *datastore.Queries) error {
+type SummaryResponse struct {
+	Default  paymentProcessor `json:"default"`
+	Fallback paymentProcessor `json:"fallback"`
+}
+
+type paymentProcessor struct {
+	TotalRequests int     `json:"totalRequests"`
+	TotalAmount   float64 `json:"totalAmount"`
+}
+
+func (s *Service) Summary(ctx context.Context, from, to string) (SummaryResponse, error) {
+	partialRes := make([]SummaryResponse, s.store.ShardCount())
+	err := s.store.ReadAll(ctx, func(shard int, queries *datastore.Queries) error {
+		res := &partialRes[shard]
+		summary, err := queries.PaymentSummary(ctx, datastore.PaymentSummaryParams{
+			FromRequestedAt: from,
+			ToRequestedAt:   to,
+		})
+		if err != nil {
+			return err
+		}
+
+		for _, row := range summary {
+			if row.Processor == "default" {
+				res.Default.TotalRequests += int(row.Total)
+				res.Default.TotalAmount += row.Amount.Float64
+			} else if row.Processor == "fallback" {
+				res.Fallback.TotalRequests += int(row.Total)
+				res.Fallback.TotalAmount += row.Amount.Float64
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return SummaryResponse{}, err
+	}
+
+	res := SummaryResponse{}
+	for _, partial := range partialRes {
+		res.Default.TotalAmount += partial.Default.TotalAmount
+		res.Default.TotalRequests += partial.Default.TotalRequests
+		res.Fallback.TotalAmount += partial.Fallback.TotalAmount
+		res.Fallback.TotalRequests += partial.Fallback.TotalRequests
+	}
+
+	return res, nil
+}
+
+func (s *Service) Log(
+	ctx context.Context, correlationID string, amount float64, requestedAt string, processor string,
+) error {
+	return s.store.Write(ctx, correlationID, func(queries *datastore.Queries) error {
 		return queries.LogPayment(ctx, datastore.LogPaymentParams{
 			CorrelationID: correlationID,
 			RequestedAt:   requestedAt,
 			Amount:        amount,
+			Processor:     processor,
 		})
 	})
 }
 
 func (s *Service) Expunge(ctx context.Context, correlationID string) error {
-	return s.db.Write(ctx, func(queries *datastore.Queries) error {
+	return s.store.Write(ctx, correlationID, func(queries *datastore.Queries) error {
 		return queries.ExpungePayment(ctx, correlationID)
 	})
 }
@@ -89,9 +144,10 @@ type paymentClient struct {
 	baseURL   *url.URL
 	httpC     *http.Client
 	available *atomic.Bool
+	name      string
 }
 
-func createClient(serviceURL string, delayFirstCheck time.Duration) paymentClient {
+func createClient(name, serviceURL string, delayFirstCheck time.Duration) paymentClient {
 	baseURL, err := url.Parse(serviceURL)
 	if err != nil {
 		panic(err)
@@ -107,6 +163,7 @@ func createClient(serviceURL string, delayFirstCheck time.Duration) paymentClien
 			},
 		},
 		available: &atomic.Bool{},
+		name:      name,
 	}
 
 	// Keep track of the availability of the client.
@@ -128,6 +185,10 @@ func createClient(serviceURL string, delayFirstCheck time.Duration) paymentClien
 type updateAvailabilityResponse struct {
 	Failing         bool `json:"failing"`
 	MinResponseTime int  `json:"minResponseTime"`
+}
+
+func (c paymentClient) String() string {
+	return c.name
 }
 
 func (c paymentClient) updateAvailability() {

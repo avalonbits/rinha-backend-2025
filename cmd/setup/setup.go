@@ -6,8 +6,7 @@ import (
 	"github.com/avalonbits/rinha-backend-2025/config"
 	"github.com/avalonbits/rinha-backend-2025/endpoints/api"
 	"github.com/avalonbits/rinha-backend-2025/service/payment"
-	"github.com/avalonbits/rinha-backend-2025/storage"
-	"github.com/avalonbits/rinha-backend-2025/storage/datastore"
+	"github.com/avalonbits/rinha-backend-2025/storage/sharded"
 	"github.com/labstack/echo/v4"
 )
 
@@ -18,16 +17,8 @@ func Echo(cfg config.Config) *Server {
 	e := echo.New()
 	server.Echo = e
 
-	db, err := storage.GetDB(
-		cfg.Database,
-		datastore.Migrations,
-		datastore.Factory,
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	payments := payment.New(cfg.PaymentProcessorDefault, cfg.PaymentProcessorBackup, db)
+	store := sharded.New(64, cfg.Database)
+	payments := payment.New(cfg.PaymentProcessorDefault, cfg.PaymentProcessorBackup, store)
 	handlers := api.New(payments)
 	e.POST("/payments", handlers.ProcessPayment)
 	e.GET("/payments-summary", handlers.PaymentSummary)

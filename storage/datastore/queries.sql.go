@@ -7,6 +7,7 @@ package datastore
 
 import (
 	"context"
+	"database/sql"
 )
 
 const expungePayment = `-- name: ExpungePayment :exec
@@ -38,4 +39,44 @@ func (q *Queries) LogPayment(ctx context.Context, arg LogPaymentParams) error {
 		arg.Amount,
 	)
 	return err
+}
+
+const paymentSummary = `-- name: PaymentSummary :many
+SELECT processor, count(*) total, sum(amount) amount FROM Payment
+    WHERE requested_at BETWEEN ? AND ?
+GROUP BY processor
+`
+
+type PaymentSummaryParams struct {
+	FromRequestedAt string
+	ToRequestedAt   string
+}
+
+type PaymentSummaryRow struct {
+	Processor string
+	Total     int64
+	Amount    sql.NullFloat64
+}
+
+func (q *Queries) PaymentSummary(ctx context.Context, arg PaymentSummaryParams) ([]PaymentSummaryRow, error) {
+	rows, err := q.db.QueryContext(ctx, paymentSummary, arg.FromRequestedAt, arg.ToRequestedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PaymentSummaryRow
+	for rows.Next() {
+		var i PaymentSummaryRow
+		if err := rows.Scan(&i.Processor, &i.Total, &i.Amount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

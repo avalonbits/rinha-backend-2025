@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -52,33 +51,54 @@ func (h *Handler) ProcessPayment(c echo.Context) error {
 	ctx := c.Request().Context()
 	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
 
-	if err := h.payments.Log(ctx, r.CorrelationID, r.Amount, createdAt); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	processor, err := h.payments.ProcessPayment(ctx, r.CorrelationID, r.Amount, createdAt)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err)
 	}
 
-	if err := h.payments.ProcessPayment(ctx, r.CorrelationID, r.Amount, createdAt); err != nil {
-		// TODO(icc): consider a 2-write solution if we get inconsistencies.
-		if expErr := h.payments.Expunge(ctx, r.CorrelationID); expErr != nil {
-			err = errors.Join(err, expErr)
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err)
+	if err := h.payments.Log(ctx, r.CorrelationID, r.Amount, createdAt, processor); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	return c.String(http.StatusOK, "")
 }
 
-type paymentSummaryResponse struct {
-	Default paymentProcessor `json:"defalt"`
-	Backup  paymentProcessor `json:"fallback"`
+type paymentSummaryRequest struct {
+	From string `query:"from"`
+	To   string `query:"to"`
 }
 
-type paymentProcessor struct {
-	TotalRequests int     `json:"totalRequests"`
-	TotalAmount   float64 `json:"totalAmount"`
+func (r *paymentSummaryRequest) validate(c echo.Context) error {
+	r.From = strings.TrimSpace(r.From)
+	if r.From != "" {
+		if _, err := time.Parse(time.RFC3339Nano, r.From); err != nil {
+			return fmt.Errorf("invalid time fromat in 'from'")
+		}
+	}
+
+	r.To = strings.TrimSpace(r.To)
+	if r.To == "" {
+		r.To = time.Now().UTC().Format(time.RFC3339Nano)
+	} else if _, err := time.Parse(time.RFC3339Nano, r.To); err != nil {
+		return fmt.Errorf("invalid time fromat in 'to'")
+	}
+
+	return nil
 }
 
 func (h *Handler) PaymentSummary(c echo.Context) error {
-	return c.JSON(http.StatusOK, paymentSummaryResponse{})
+	r := paymentSummaryRequest{}
+	if err := h.validateRequest(c, &r); err != nil {
+		return err
+	}
+
+	ctx := c.Request().Context()
+	summary, err := h.payments.Summary(ctx, r.From, r.To)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+
+	return c.JSON(http.StatusOK, summary)
 }
 
 type validator interface {
